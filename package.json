@@ -1,0 +1,24 @@
+{
+  "name": "visual-doc-ai-web",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Visual Document AI — extract structured data from invoices, receipts & IDs with bounding boxes + confidence. Next.js + OpenAI vision, deployable on Vercel.",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "next": "^14.2.35",
+    "openai": "^4.67.3",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.16.11",
+    "@types/react": "^18.3.11",
+    "@types/react-dom": "^18.3.0",
+    "typescript": "^5.6.3"
+  }
+}
