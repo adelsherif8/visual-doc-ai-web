@@ -9,6 +9,19 @@ boxes over every detected field**, **structured JSON with confidence**, and a
 
 ![screenshot](docs/screenshot.png)
 
+### Works on real-world documents, not just the samples
+
+Upload any document and it runs the same live pipeline. A real photographed
+store receipt — 11 fields extracted, boxes grounded by OCR:
+
+![real receipt](docs/real-receipt.png)
+
+Even a **handwritten** invoice photo — the VLM reads the vendor, customer and
+date (with honest, varied confidence); OCR can't ground handwriting so boxes
+are sparse there, and the UI says so:
+
+![real handwritten invoice](docs/real-handwritten.png)
+
 ## How it works
 
 **Every document — bundled sample or your own upload — runs the same real
