@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { extractDocument, MOCK, MODEL } from "@/lib/llm";
+import { extractVlm, MOCK, MODEL } from "@/lib/llm";
 
-// Node runtime (OpenAI SDK + tesseract.js WASM); never statically cached.
+// Node runtime (OpenAI SDK); never statically cached. VLM-only, so it's fast.
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 30;
 
 export async function GET() {
   return NextResponse.json({ mock: MOCK, model: MODEL });
@@ -24,8 +24,8 @@ export async function POST(req: NextRequest) {
     if (typeof image !== "string" || !image.startsWith("data:image")) {
       return NextResponse.json({ error: "A base64 'image' data URL is required." }, { status: 400 });
     }
-    const result = await extractDocument(image);
-    return NextResponse.json(result);
+    const vlm = await extractVlm(image);
+    return NextResponse.json(vlm);
   } catch (e) {
     return NextResponse.json(
       { error: (e as Error).message || "extraction error" },

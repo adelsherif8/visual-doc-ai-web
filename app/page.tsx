@@ -2,7 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { extractBaseline } from "@/lib/baseline";
 import { compare } from "@/lib/compare";
+import { locate } from "@/lib/ocr-core";
+import { ocrBrowser } from "@/lib/ocr-browser";
 import { sampleExtractions, SAMPLES, SampleMeta } from "@/lib/samples";
 import { ApiResult, CompareRow, Extraction, Field, label } from "@/lib/types";
 
@@ -39,7 +42,7 @@ async function urlToDataUrl(url: string): Promise<string> {
   });
 }
 
-async function postExtract(dataUrl: string): Promise<ApiResult> {
+async function postVlm(dataUrl: string): Promise<Extraction> {
   const res = await fetch("/api/extract", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -47,7 +50,25 @@ async function postExtract(dataUrl: string): Promise<ApiResult> {
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || "extraction failed");
-  return data as ApiResult;
+  return data as Extraction;
+}
+
+// The real pipeline, identical for samples and uploads: OCR in the browser +
+// VLM on the server (in parallel), then locate each VLM value to its OCR box
+// and run the OCR+regex baseline on the same words.
+async function runReal(dataUrl: string): Promise<ApiResult> {
+  const [ocrRes, vlmResp] = await Promise.all([
+    ocrBrowser(dataUrl).catch(() => ({ words: [], width: 1, height: 1, fullText: "" })),
+    postVlm(dataUrl),
+  ]);
+  const vlm: Extraction = {
+    ...vlmResp,
+    fields: vlmResp.fields.map((f) => ({ ...f, bbox: locate(f.value, ocrRes.words) })),
+  };
+  const baseline: Extraction = ocrRes.words.length
+    ? extractBaseline(ocrRes, vlm.doc_type)
+    : { engine: "baseline", doc_type: vlm.doc_type, fields: [], line_items: [], note: "OCR produced no text for this image." };
+  return { vlm, baseline, doc_type: vlm.doc_type, ocr: ocrRes.words.length > 0 };
 }
 
 function Boxes({ fields }: { fields: Field[] }) {
@@ -139,7 +160,7 @@ export default function Page() {
       let res = cache.current.get(name);
       if (!res) {
         const dataUrl = await urlToDataUrl(`/samples/${name}.png`);
-        res = await postExtract(dataUrl);
+        res = await runReal(dataUrl);
         cache.current.set(name, res);
       }
       apply(res);
@@ -167,7 +188,7 @@ export default function Page() {
       }
       setLoading(true);
       try {
-        apply(await postExtract(dataUrl));
+        apply(await runReal(dataUrl));
       } catch (e) {
         setError((e as Error).message);
       } finally {

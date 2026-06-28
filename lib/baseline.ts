@@ -1,7 +1,7 @@
 // The real OCR + regex baseline — the "before" in the case study. It runs on
 // the same OCR output the VLM boxes use, so the comparison is honest: this is
 // genuinely what a regex pass over the OCR text recovers (and what it can't).
-import { locate, OcrResult } from "@/lib/ocr";
+import { locate, OcrResult } from "@/lib/ocr-core";
 import { Extraction, Field } from "@/lib/types";
 
 const MONEY = /[$€£]\s?\d[\d,]*\.?\d{0,2}/g;
