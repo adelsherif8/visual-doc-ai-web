@@ -11,15 +11,24 @@ boxes over every detected field**, **structured JSON with confidence**, and a
 
 ## How it works
 
-- **Bundled samples** (invoice, receipt, CA ID) render entirely in the browser
-  from baked ground truth (`public/samples/*.json`) — pixel-perfect boxes and
-  JSON with **no key and no server call**, so the demo always works.
-- **Uploads** POST the image to a serverless route (`app/api/extract/route.ts`)
-  that calls **gpt-4o-mini** vision and returns typed fields with confidence and
-  a normalized bounding box per field. Boxes are drawn as overlays scaled to the
-  image, so they stay aligned at any size.
-- **Baseline vs VLM**: each sample ships the subset a naive OCR+regex pass would
-  catch; the UI diffs it against the VLM field-for-field so you can see the gap.
+**Every document — bundled sample or your own upload — runs the same real
+pipeline** in a serverless route (`app/api/extract/route.ts`). There is no
+canned "demo" branch:
+
+1. **OCR** the page with `tesseract.js` (pure WASM, runs in the function) →
+   word-level boxes. This is where the bounding boxes come from.
+2. **VLM**: `gpt-4o-mini` reads the image → typed fields + confidence. This is
+   where meaning comes from.
+3. Each VLM value is **located back to OCR words** for a tight box; boxes are
+   normalized and drawn as overlays scaled to the image.
+4. The **OCR+regex baseline** runs on the same OCR text, and the UI diffs it
+   against the VLM field-for-field — an honest, live comparison.
+
+Sample clicks are cached per session so you don't re-spend on the same doc.
+
+> Offline fallback: with **no key on the server**, the bundled samples fall back
+> to baked ground truth (`public/samples/*.json`) so the repo still demos
+> without an API key. The deployed site runs the full real pipeline.
 
 ## Run locally
 

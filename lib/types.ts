@@ -25,6 +25,13 @@ export interface Extraction {
   usage?: { prompt_tokens: number; completion_tokens: number; cost_usd: number };
 }
 
+export interface ApiResult {
+  vlm: Extraction;
+  baseline: Extraction;
+  doc_type: string;
+  ocr: boolean; // whether OCR produced word boxes
+}
+
 export interface CompareRow {
   field: string;
   vlm: string;

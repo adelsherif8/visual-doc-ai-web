@@ -1,12 +1,15 @@
-// Server-side VLM extraction for uploaded documents.
-//   Real mode -> gpt-4o-mini reads the page image and returns typed fields with
-//                confidence + a normalized bounding box per field.
-//   Mock mode -> no key set: returns an empty result that tells the user to add
-//                a key. (Bundled samples never hit this path — they render from
-//                baked ground truth in the browser.)
+// The unified extraction pipeline — the SAME real path for bundled samples and
+// uploaded documents:
+//   1. OCR the page (tesseract.js) -> word boxes
+//   2. VLM (gpt-4o-mini) reads the image -> typed fields + confidence
+//   3. each VLM value is located back to OCR words for a tight bounding box
+//   4. the OCR+regex baseline runs on the same OCR text -> the comparison
+// There is no canned "demo" branch: with a key set, every document runs this.
 import OpenAI from "openai";
 
-import { Bbox, Extraction, Field } from "@/lib/types";
+import { extractBaseline } from "@/lib/baseline";
+import { locate, ocr, type OcrResult } from "@/lib/ocr";
+import { ApiResult, Extraction, Field, LineItem } from "@/lib/types";
 
 export const MOCK = !process.env.OPENAI_API_KEY;
 export const MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
@@ -25,35 +28,33 @@ function costUsd(model: string, p: number, c: number): number {
 const SYSTEM = `You are a precise document data-extraction engine. Read the document image and return STRICT JSON only, no prose.
 Shape:
 { "doc_type": "invoice|receipt|id_card|other",
-  "fields": [ { "key": "snake_case_field", "value": "string", "confidence": 0.0-1.0, "bbox": [x0,y0,x1,y1] } ],
+  "fields": [ { "key": "snake_case_field", "value": "string", "confidence": 0.0-1.0 } ],
   "line_items": [ { "description": "", "qty": "", "amount": "" } ] }
 Rules:
 - Use snake_case keys (e.g. invoice_number, invoice_date, due_date, vendor_name, bill_to, subtotal, tax, total, merchant, payment_method, full_name, id_number, date_of_birth, issue_date, expiry_date, address).
-- bbox is the tight box around the VALUE text, as fractions of image size: x0,y0 = top-left, x1,y1 = bottom-right, each 0..1.
-- Copy values verbatim. confidence = how sure you are. Omit fields not present. line_items only for invoices/receipts.`;
+- Copy values verbatim as they appear. confidence = how sure you are. Omit fields not present. line_items only for invoices/receipts.`;
 
 function clamp01(n: number): number {
   return Math.max(0, Math.min(1, n));
 }
 
-function toBbox(raw: unknown): Bbox | null {
-  if (!Array.isArray(raw) || raw.length !== 4) return null;
-  const b = raw.map((x) => clamp01(Number(x)));
-  if (b.some((x) => Number.isNaN(x))) return null;
-  if (b[2] <= b[0] || b[3] <= b[1]) return null;
-  return [b[0], b[1], b[2], b[3]];
+function dataUrlToBuffer(dataUrl: string): Buffer {
+  const i = dataUrl.indexOf(",");
+  return Buffer.from(dataUrl.slice(i + 1), "base64");
 }
 
-export async function extractUpload(dataUrl: string): Promise<Extraction> {
-  if (MOCK) {
-    return {
-      engine: "vlm",
-      doc_type: "unknown",
-      fields: [],
-      line_items: [],
-      note: "Demo is running without an OpenAI key, so live uploads are disabled. The bundled samples still work. (Set OPENAI_API_KEY to enable uploads.)",
-    };
+async function safeOcr(buf: Buffer): Promise<OcrResult> {
+  try {
+    return await ocr(buf);
+  } catch {
+    return { words: [], width: 1, height: 1, fullText: "" };
   }
+}
+
+// Live VLM + OCR. Returns both engines, both real.
+export async function extractDocument(dataUrl: string): Promise<ApiResult> {
+  const buf = dataUrlToBuffer(dataUrl);
+  const ocrResult = await safeOcr(buf);
 
   const client = new OpenAI();
   const resp = await client.chat.completions.create({
@@ -72,10 +73,9 @@ export async function extractUpload(dataUrl: string): Promise<Extraction> {
     ],
   });
 
-  const raw = resp.choices[0]?.message?.content || "{}";
   let parsed: any;
   try {
-    parsed = JSON.parse(raw);
+    parsed = JSON.parse(resp.choices[0]?.message?.content || "{}");
   } catch {
     parsed = { doc_type: "unknown", fields: [] };
   }
@@ -86,10 +86,10 @@ export async function extractUpload(dataUrl: string): Promise<Extraction> {
       key: String(f.key),
       value: String(f.value),
       confidence: typeof f.confidence === "number" ? clamp01(f.confidence) : 0.8,
-      bbox: toBbox(f.bbox),
+      bbox: locate(String(f.value), ocrResult.words),
     }));
 
-  const line_items = (parsed.line_items || [])
+  const line_items: LineItem[] = (parsed.line_items || [])
     .filter((li: any) => li?.description)
     .map((li: any) => ({
       description: String(li.description),
@@ -98,16 +98,29 @@ export async function extractUpload(dataUrl: string): Promise<Extraction> {
     }));
 
   const u = resp.usage;
-  return {
+  const docType = parsed.doc_type || "unknown";
+  const vlm: Extraction = {
     engine: "vlm",
-    doc_type: parsed.doc_type || "unknown",
+    doc_type: docType,
     fields,
     line_items,
-    note: `Live extraction via ${MODEL}.`,
+    note: `Live extraction via ${MODEL}${ocrResult.words.length ? " · boxes grounded by OCR" : ""}.`,
     usage: {
       prompt_tokens: u?.prompt_tokens ?? 0,
       completion_tokens: u?.completion_tokens ?? 0,
       cost_usd: costUsd(MODEL, u?.prompt_tokens ?? 0, u?.completion_tokens ?? 0),
     },
   };
+
+  const baseline = ocrResult.words.length
+    ? extractBaseline(ocrResult, docType)
+    : {
+        engine: "baseline" as const,
+        doc_type: docType,
+        fields: [],
+        line_items: [],
+        note: "OCR returned no text for this image, so the regex baseline produced nothing.",
+      };
+
+  return { vlm, baseline, doc_type: docType, ocr: ocrResult.words.length > 0 };
 }

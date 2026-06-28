@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { compare } from "@/lib/compare";
 import { sampleExtractions, SAMPLES, SampleMeta } from "@/lib/samples";
-import { CompareRow, Extraction, Field, label } from "@/lib/types";
+import { ApiResult, CompareRow, Extraction, Field, label } from "@/lib/types";
 
 function confColor(c: number): string {
   return c >= 0.85 ? "#10b981" : c >= 0.65 ? "#d97706" : "#dc2626";
@@ -27,6 +27,27 @@ function jsonView(ext: Extraction) {
   const out: any = { doc_type: ext.doc_type, fields };
   if (ext.line_items.length) out.line_items = ext.line_items;
   return out;
+}
+
+async function urlToDataUrl(url: string): Promise<string> {
+  const blob = await fetch(url).then((r) => r.blob());
+  return await new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result as string);
+    r.onerror = reject;
+    r.readAsDataURL(blob);
+  });
+}
+
+async function postExtract(dataUrl: string): Promise<ApiResult> {
+  const res = await fetch("/api/extract", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ image: dataUrl }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "extraction failed");
+  return data as ApiResult;
 }
 
 function Boxes({ fields }: { fields: Field[] }) {
@@ -72,48 +93,81 @@ export default function Page() {
   const [tab, setTab] = useState<"json" | "compare">("json");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>("");
+  const cache = useRef<Map<string, ApiResult>>(new Map());
 
   useEffect(() => {
     fetch("/api/extract")
       .then((r) => r.json())
-      .then(setStatus)
-      .catch(() => setStatus({ mock: true, model: "gpt-4o-mini" }));
-    loadSample(SAMPLES[0].name);
+      .then((s) => {
+        setStatus(s);
+        loadSample(SAMPLES[0].name, s);
+      })
+      .catch(() => {
+        const s = { mock: true, model: "gpt-4o-mini" };
+        setStatus(s);
+        loadSample(SAMPLES[0].name, s);
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function loadSample(name: string) {
+  function apply(res: ApiResult) {
+    setVlm(res.vlm);
+    setBaseline(res.baseline);
+    setHasBaseline(res.ocr);
+  }
+
+  async function loadSample(name: string, st?: { mock: boolean; model: string } | null) {
+    const s = st || status;
     setActive(name);
     setEngine("vlm");
-    setHasBaseline(true);
     setError("");
     setImgUrl(`/samples/${name}.png`);
-    const meta: SampleMeta = await fetch(`/samples/${name}.json`).then((r) => r.json());
-    const { vlm: v, baseline: b } = sampleExtractions(meta);
-    setVlm(v);
-    setBaseline(b);
+
+    // No key on the server -> offline preview from baked ground truth.
+    if (s?.mock) {
+      const meta: SampleMeta = await fetch(`/samples/${name}.json`).then((r) => r.json());
+      const { vlm: v, baseline: b } = sampleExtractions(meta);
+      setVlm({ ...v, note: "Offline preview (no API key on server). Set OPENAI_API_KEY for live extraction." });
+      setBaseline(b);
+      setHasBaseline(true);
+      return;
+    }
+
+    // Live: run the SAME real pipeline as uploads (cached per sample).
+    setLoading(true);
+    try {
+      let res = cache.current.get(name);
+      if (!res) {
+        const dataUrl = await urlToDataUrl(`/samples/${name}.png`);
+        res = await postExtract(dataUrl);
+        cache.current.set(name, res);
+      }
+      apply(res);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function onUpload(file: File) {
     setError("");
-    setLoading(true);
     setEngine("vlm");
-    setHasBaseline(false);
     setActive("");
     const reader = new FileReader();
     reader.onload = async () => {
       const dataUrl = reader.result as string;
       setImgUrl(dataUrl);
+      if (status?.mock) {
+        setVlm({ engine: "vlm", doc_type: "unknown", fields: [], line_items: [],
+          note: "Live uploads need an API key on the server (set OPENAI_API_KEY)." });
+        setBaseline(null);
+        setHasBaseline(false);
+        return;
+      }
+      setLoading(true);
       try {
-        const res = await fetch("/api/extract", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ image: dataUrl }),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || "extraction failed");
-        setVlm(data as Extraction);
-        setBaseline({ engine: "baseline", doc_type: data.doc_type, fields: [], line_items: [], note: "" });
+        apply(await postExtract(dataUrl));
       } catch (e) {
         setError((e as Error).message);
       } finally {
@@ -141,12 +195,12 @@ export default function Page() {
         <div className="badges">
           {status && (
             <span className={`badge ${status.mock ? "mock" : "live"}`}>
-              {status.mock ? "🟣 Sample demo (no key)" : "🟢 Live uploads enabled"}
+              {status.mock ? "🟣 Offline preview (no key)" : "🟢 Live — real OCR + VLM on every doc"}
             </span>
           )}
           <span className="badge">model {status?.model || "gpt-4o-mini"}</span>
-          <span className="badge">VLM extraction</span>
-          <span className="badge">bounding boxes + confidence</span>
+          <span className="badge">OCR-grounded boxes</span>
+          <span className="badge">confidence scores</span>
         </div>
       </header>
 
@@ -156,6 +210,7 @@ export default function Page() {
             key={s.name}
             className={`pick${active === s.name ? " active" : ""}`}
             onClick={() => loadSample(s.name)}
+            disabled={loading}
           >
             {s.label}
           </button>
@@ -165,6 +220,7 @@ export default function Page() {
           <input
             type="file"
             accept="image/png,image/jpeg,image/webp"
+            disabled={loading}
             onChange={(e) => e.target.files?.[0] && onUpload(e.target.files[0])}
           />
         </label>
@@ -193,13 +249,12 @@ export default function Page() {
             {!loading && shown && <Boxes fields={shown.fields} />}
             {loading && (
               <div className="placeholder">
-                <span className="spin" /> &nbsp;extracting with the VLM…
+                <span className="spin" /> &nbsp;running OCR + gpt-4o-mini…
               </div>
             )}
           </div>
           <div className="note">
-            🟩 high · 🟧 medium · 🟥 low confidence.{" "}
-            {shown?.note}
+            🟩 high · 🟧 medium · 🟥 low confidence. {shown?.note}
           </div>
         </div>
 
@@ -232,22 +287,23 @@ export default function Page() {
             </div>
           )}
           {error && <div className="note" style={{ color: "#dc2626" }}>⚠ {error}</div>}
-          {shown && shown.fields.length === 0 && <div className="note">{shown.note}</div>}
-          {shown?.fields.map((f, i) => {
-            const pct = Math.round(f.confidence * 100);
-            return (
-              <div className="fld" key={i}>
-                <div className="fld-top">
-                  <span className="fld-key">{label(f.key)}</span>
-                  <span className="fld-val mono">{f.value}</span>
+          {!loading && shown && shown.fields.length === 0 && <div className="note">{shown.note}</div>}
+          {!loading &&
+            shown?.fields.map((f, i) => {
+              const pct = Math.round(f.confidence * 100);
+              return (
+                <div className="fld" key={i}>
+                  <div className="fld-top">
+                    <span className="fld-key">{label(f.key)}</span>
+                    <span className="fld-val mono">{f.value}</span>
+                  </div>
+                  <div className="bar">
+                    <span style={{ width: `${pct}%`, background: confColor(f.confidence) }} />
+                  </div>
+                  <div className="confnote">confidence {pct}%</div>
                 </div>
-                <div className="bar">
-                  <span style={{ width: `${pct}%`, background: confColor(f.confidence) }} />
-                </div>
-                <div className="confnote">confidence {pct}%</div>
-              </div>
-            );
-          })}
+              );
+            })}
         </div>
       </div>
 
@@ -291,16 +347,13 @@ export default function Page() {
               </tbody>
             </table>
           ) : (
-            <div className="note">
-              The OCR+regex baseline runs on the bundled samples (and in the local Python version).
-              Pick a sample above to see the side-by-side.
-            </div>
+            <div className="note">Pick a document to see the OCR+regex baseline vs the VLM, field by field.</div>
           ))}
       </div>
 
       <div className="foot">
-        Boxes are grounded on the page; the VLM (gpt-4o-mini) decides what each value means.
-        Bundled samples render from baked ground truth so the demo always works.
+        Every document — sample or upload — runs the same real pipeline: tesseract.js OCR for
+        boxes, gpt-4o-mini for the values. Boxes are grounded on the page by OCR.
       </div>
     </div>
   );
