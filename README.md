@@ -5,6 +5,10 @@ boxes over every detected field**, **structured JSON with confidence**, and a
 **baseline-vs-VLM** comparison. This is the Vercel-deployable web version of the
 [Python/Gradio project](../visual-doc-ai).
 
+**Live demo → https://visual-doc-ai-web.vercel.app**
+
+![screenshot](docs/screenshot.png)
+
 ## How it works
 
 - **Bundled samples** (invoice, receipt, CA ID) render entirely in the browser
