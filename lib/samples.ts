@@ -13,12 +13,13 @@ export interface SampleMeta {
 export interface Sample {
   name: string;
   label: string;
+  icon: string; // Font Awesome class
 }
 
 export const SAMPLES: Sample[] = [
-  { name: "invoice_techflow", label: "🧾 SaaS Invoice" },
-  { name: "receipt_greenleaf", label: "🛒 Store Receipt" },
-  { name: "id_card_ca", label: "🪪 ID Card" },
+  { name: "invoice_techflow", label: "SaaS Invoice", icon: "fa-file-invoice-dollar" },
+  { name: "receipt_greenleaf", label: "Store Receipt", icon: "fa-receipt" },
+  { name: "id_card_ca", label: "ID Card", icon: "fa-id-card" },
 ];
 
 function normBox(b: number[], w: number, h: number): Bbox {

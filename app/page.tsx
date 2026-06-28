@@ -216,7 +216,11 @@ export default function Page() {
         <div className="badges">
           {status && (
             <span className={`badge ${status.mock ? "mock" : "live"}`}>
-              {status.mock ? "🟣 Offline preview (no key)" : "🟢 Live — real OCR + VLM on every doc"}
+              <i
+                className="fas fa-circle"
+                style={{ fontSize: 8, marginRight: 7, verticalAlign: "middle", color: status.mock ? "#a78bfa" : "#34d399" }}
+              />
+              {status.mock ? "Offline preview (no key)" : "Live — real OCR + VLM on every doc"}
             </span>
           )}
           <span className="badge">model {status?.model || "gpt-4o-mini"}</span>
@@ -233,11 +237,13 @@ export default function Page() {
             onClick={() => loadSample(s.name)}
             disabled={loading}
           >
+            <i className={`fas ${s.icon}`} style={{ marginRight: 8 }} />
             {s.label}
           </button>
         ))}
         <label className="pick upload">
-          ⬆ Upload your own
+          <i className="fas fa-arrow-up-from-bracket" style={{ marginRight: 8 }} />
+          Upload your own
           <input
             type="file"
             accept="image/png,image/jpeg,image/webp"
@@ -256,10 +262,10 @@ export default function Page() {
             {hasBaseline && (
               <span className="toggle">
                 <button className={engine === "vlm" ? "on" : ""} onClick={() => setEngine("vlm")}>
-                  ✨ VLM
+                  <i className="fas fa-wand-magic-sparkles" style={{ marginRight: 6 }} />VLM
                 </button>
                 <button className={engine === "baseline" ? "on" : ""} onClick={() => setEngine("baseline")}>
-                  ⚙️ Baseline
+                  <i className="fas fa-gear" style={{ marginRight: 6 }} />Baseline
                 </button>
               </span>
             )}
@@ -275,7 +281,9 @@ export default function Page() {
             )}
           </div>
           <div className="note">
-            🟩 high · 🟧 medium · 🟥 low confidence. {shown?.note}
+            <i className="fas fa-square" style={{ color: "#10b981" }} /> high&nbsp;·&nbsp;
+            <i className="fas fa-square" style={{ color: "#d97706" }} /> medium&nbsp;·&nbsp;
+            <i className="fas fa-square" style={{ color: "#dc2626" }} /> low confidence. {shown?.note}
           </div>
         </div>
 
@@ -307,7 +315,11 @@ export default function Page() {
               )}
             </div>
           )}
-          {error && <div className="note" style={{ color: "#dc2626" }}>⚠ {error}</div>}
+          {error && (
+            <div className="note" style={{ color: "#dc2626" }}>
+              <i className="fas fa-triangle-exclamation" style={{ marginRight: 6 }} />{error}
+            </div>
+          )}
           {!loading && shown && shown.fields.length === 0 && <div className="note">{shown.note}</div>}
           {!loading &&
             shown?.fields.map((f, i) => {
