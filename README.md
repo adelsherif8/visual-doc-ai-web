@@ -24,6 +24,8 @@ are sparse there, and the UI says so:
 
 ## How it works
 
+![pipeline](docs/workflow.png)
+
 **Every document — bundled sample or your own upload — runs the same real
 pipeline** in a serverless route (`app/api/extract/route.ts`). There is no
 canned "demo" branch:
